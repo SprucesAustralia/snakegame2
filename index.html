@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <!-- Ensure proper scaling on mobile devices -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ricky Plaza the surfer!</title>
+  <style>
+    /* GENERAL STYLES */
+    body {
+      background-color: #222;
+      color: #eee;
+      font-family: monospace;
+      text-align: center;
+      margin: 0;
+      padding: 0;
+    }
+    h1 {
+      margin-top: 20px;
+    }
+    /* GAME CANVAS */
+    canvas {
+      background-color: #000;
+      display: block;
+      margin: 20px auto;
+      border: 2px solid #555;
+    }
+    /* MESSAGE FOR FREE GAME OFFER (threshold updated to 30) */
+    #freeGameMessage {
+      font-size: 1.1em;
+      margin: 10px 0;
+    }
+    /* BOTTOM ROW: Left = Reset/Mute; Right = Score */
+    #bottomRow {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin: 10px 20px;
+    }
+    #leftControls {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+    }
+    /* Reset container holds only the Reset Game button (arrow removed from here) */
+    #resetContainer {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #scoreContainer {
+      text-align: right;
+      flex-grow: 1;
+    }
+    /* DIRECTIONAL CONTROLS – Big buttons for mobile */
+    #directionalControls {
+      margin: 20px auto;
+    }
+    #directionalControls button {
+      width: 80px;
+      height: 80px;
+      margin: 5px;
+      font-size: 1.2em;
+      text-align: center;
+      vertical-align: middle;
+    }
+    /* Arrange Up above, and Left/Down/Right in one row */
+    #middleRow {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    /* Container for the Right directional button and the glowing arrow */
+    .rightButtonContainer {
+      position: relative;
+      display: inline-block;
+    }
+    /* The glowing red arrow positioned to the right of the "Right" button.
+       It is slightly bigger, points down, and its opacity glows up and down slowly. */
+    #glowingArrow {
+      position: absolute;
+      top: 50%;
+      right: -25px; /* Adjust offset as needed */
+      transform: translateY(-50%);
+      font-size: 30px;
+      color: red;
+      animation: glow 2s infinite alternate;
+    }
+    @keyframes glow {
+      from { opacity: 0.5; }
+      to { opacity: 1; }
+    }
+    /* Request custom game button */
+    #requestButton {
+      font-size: 1.2em;
+      padding: 10px 20px;
+      margin: 20px;
+      cursor: pointer;
+    }
+    /* Mute button styling */
+    #muteButton {
+      font-size: 1em;
+      padding: 5px 10px;
+      margin-top: 5px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <h1>Ricky Plaza the surfer!</h1>
+  <canvas id="gameCanvas"></canvas>
+  
+  <!-- Free game offer message (threshold updated to 30) -->
+  <div id="freeGameMessage">
+    scoring 30 will allow you to request a custom game for free! 🎁
+  </div>
+  
+  <!-- Bottom row: Left column contains Reset Game and Mute buttons; Right column shows Score -->
+  <div id="bottomRow">
+    <div id="leftControls">
+      <div id="resetContainer">
+        <button id="restartButton">Reset Game</button>
+      </div>
+      <button id="muteButton">🔇</button>
+    </div>
+    <div id="scoreContainer">
+      <p id="score">Score: 0</p>
+    </div>
+  </div>
+  
+  <!-- Directional controls (mobile-friendly arrow buttons) -->
+  <div id="directionalControls">
+    <button id="upButton">Up</button>
+    <div id="middleRow">
+      <button id="leftButton">Left</button>
+      <button id="downButton">Down</button>
+      <div class="rightButtonContainer">
+        <button id="rightButton">Right</button>
+        <!-- Glowing red arrow (points down) placed next to the "Right" button -->
+        <span id="glowingArrow">&#x2193;</span>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Request custom game button -->
+  <button id="requestButton">request your own game to gift someone!</button>
+  
+  <script>
+    /***********************
+     * CANVAS & GAME SETUP *
+     ***********************/
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    
+    let gridSize = 15;      // The game grid is gridSize x gridSize cells.
+    let cellSize;           // Computed based on the canvas size.
+    let artFontSize;        // Font size used for ASCII art drawings.
+    
+    function resizeCanvas() {
+      canvas.width = Math.min(window.innerWidth * 0.95, 500);
+      canvas.height = canvas.width;  // Square canvas.
+      cellSize = canvas.width / gridSize;
+      artFontSize = Math.floor(cellSize * 0.5);
+    }
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+    
+    /***********************
+     * GAME VARIABLES *
+     ***********************/
+    let score = 0;
+    let direction = { x: 1, y: 0 };  // Initial movement to the right.
+    let gameSpeed = 150;             // Game tick every 150ms.
+    let gameInterval;
+    let gamePaused = false;          // Paused during countdown.
+    
+    // For displaying "yeh bro!" after eating food.
+    let showMessage = false;
+    let messageTimestamp = 0;
+    const messageDuration = 500;  // Display duration: 0.5 seconds.
+    
+    // Initialize snake: start with 3 segments at the center.
+    function getInitialSnake() {
+      const startX = Math.floor(gridSize / 2);
+      const startY = Math.floor(gridSize / 2);
+      return [
+        { x: startX,     y: startY },
+        { x: startX - 1, y: startY },
+        { x: startX - 2, y: startY }
+      ];
+    }
+    let snake = getInitialSnake();
+    let food = randomFoodPosition();
+    
+    /***********************
+     * IMAGE FOR SNAKE HEAD *
+     ***********************/
+    // Create an image object for the snake head.
+    const snakeHeadImg = new Image();
+    snakeHeadImg.src = "snakehead.png"; // Make sure this file is in the same folder as index.html.
+    
+    /***********************
+     * ASCII ART DEFINITIONS *
+     ***********************/
+    // (Optional: You can keep these for the food, etc.)
+    const surferArt = [
+      "  \\o/  ",
+      "   |   ",
+      "  / \\  "
+    ];
+    const surfboardArt = [
+      "/|\\",
+      "|||",
+      "\\|/"
+    ];
+    
+    // Helper: Draw multi-line ASCII art centered at (centerX, centerY) and draw a label below.
+    function drawArt(artArray, centerX, centerY, fontSize, artColor, labelText) {
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      ctx.font = fontSize + "px monospace";
+      ctx.fillStyle = artColor;
+      const lineHeight = fontSize;
+      const totalHeight = artArray.length * lineHeight;
+      let startY = centerY - totalHeight / 2;
+      for (let i = 0; i < artArray.length; i++) {
+        ctx.fillText(artArray[i], centerX, startY + i * lineHeight);
+      }
+      ctx.font = (fontSize * 0.7) + "px monospace";
+      ctx.fillStyle = "#fff";
+      ctx.fillText(labelText, centerX, startY + totalHeight + (fontSize * 0.2));
+    }
+    
+    /***********************
+     * BACKGROUND MUSIC SETUP *
+     ***********************/
+    // Sound is off by default (isMuted = true). The user must click the Mute button to enable sound.
+    let isMuted = true;
+    let audioCtx = null;
+    let musicInterval = null;
+    // A simple melody (using basic Nokia-style beeps) that nods to Hotel California.
+    const melody = [330, 349, 392, 440, 392, 349, 330, 294]; 
+    let melodyIndex = 0;
+    
+    function playBeep(frequency, duration) {
+      if (isMuted) return;
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      let oscillator = audioCtx.createOscillator();
+      oscillator.frequency.value = frequency;
+      oscillator.connect(audioCtx.destination);
+      oscillator.start();
+      setTimeout(() => {
+        oscillator.stop();
+      }, duration);
+    }
+    
+    function startMusic() {
+      if (isMuted) return;
+      if (musicInterval) clearInterval(musicInterval);
+      musicInterval = setInterval(() => {
+        playBeep(melody[melodyIndex], 150);
+        melodyIndex = (melodyIndex + 1) % melody.length;
+      }, 500);
+    }
+    
+    function stopMusic() {
+      if (musicInterval) {
+        clearInterval(musicInterval);
+        musicInterval = null;
+      }
+    }
+    
+    /***********************
+     * MAIN GAME LOOP & LOGIC *
+     ***********************/
+    function gameLoop() {
+      if (!gamePaused) {
+        update();
+        draw();
+      }
+    }
+    
+    function update() {
+      // Calculate new head position.
+      const newHead = {
+        x: snake[0].x + direction.x,
+        y: snake[0].y + direction.y
+      };
+      
+      // Check wall collision.
+      if (newHead.x < 0 || newHead.x >= gridSize ||
+          newHead.y < 0 || newHead.y >= gridSize) {
+        return gameOver();
+      }
+      
+      // Check self-collision.
+      for (let segment of snake) {
+        if (newHead.x === segment.x && newHead.y === segment.y) {
+          return gameOver();
+        }
+      }
+      
+      // Add new head.
+      snake.unshift(newHead);
+      
+      /**************************************
+       * LENIENT FOOD COLLISION DETECTION *
+       **************************************/
+      let snakeLeft   = newHead.x * cellSize;
+      let snakeTop    = newHead.y * cellSize;
+      let snakeRight  = snakeLeft + cellSize;
+      let snakeBottom = snakeTop + cellSize;
+      
+      let foodCenterX = food.x * cellSize + cellSize / 2;
+      let foodCenterY = food.y * cellSize + cellSize / 2;
+      let foodWidth  = 1.8 * artFontSize;
+      let foodHeight = 3 * artFontSize;
+      let foodLeft   = foodCenterX - foodWidth / 2;
+      let foodRight  = foodCenterX + foodWidth / 2;
+      let foodTop    = foodCenterY - foodHeight / 2;
+      let foodBottom = foodCenterY + foodHeight / 2;
+      
+      if (snakeRight > foodLeft && snakeLeft < foodRight &&
+          snakeBottom > foodTop && snakeTop < foodBottom) {
+        // Food is eaten.
+        score++;
+        document.getElementById('score').innerText = "Score: " + score;
+        
+        // Increase snake speed by 2% (reduce the game interval time by 2%).
+        gameSpeed = gameSpeed * 0.98;
+        clearInterval(gameInterval);
+        gameInterval = setInterval(gameLoop, gameSpeed);
+        
+        food = randomFoodPosition();
+        showMessage = true;
+        messageTimestamp = Date.now();
+        
+        // Grow snake by 3 segments (one already added plus two extra).
+        let tail = snake[snake.length - 1];
+        snake.push({ x: tail.x, y: tail.y });
+        snake.push({ x: tail.x, y: tail.y });
+        
+        // Winner condition: if score reaches 30, display the winner message.
+        if (score >= 30) {
+          clearInterval(gameInterval);
+          stopMusic();
+          alert("winner! use code free-5nak3! on checkout\nIf your game is stuck, refresh the page or click the link again!");
+          return;
+        }
+      } else {
+        // Remove tail segment if no food is eaten.
+        snake.pop();
+      }
+    }
+    
+    function draw() {
+      // Clear the canvas.
+      ctx.fillStyle = "#000";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      
+      // Draw food (surfboard) using ASCII art.
+      let foodCenterX = food.x * cellSize + cellSize / 2;
+      let foodCenterY = food.y * cellSize + cellSize / 2;
+      drawArt(surfboardArt, foodCenterX, foodCenterY, artFontSize, "#0f0", "Surfboard");
+      
+      // Draw the snake.
+      snake.forEach((segment, index) => {
+        let centerX = segment.x * cellSize + cellSize / 2;
+        let centerY = segment.y * cellSize + cellSize / 2;
+        if (index === 0) {
+          // Draw the snake head using the PNG image.
+          if (snakeHeadImg.complete) {
+            ctx.drawImage(snakeHeadImg, centerX - cellSize / 2, centerY - cellSize / 2, cellSize, cellSize);
+          } else {
+            ctx.font = artFontSize + "px monospace";
+            ctx.fillStyle = "#ff0";
+            ctx.fillText("Loading...", centerX, centerY);
+          }
+        } else {
+          // Draw body segments using ASCII (==).
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.font = artFontSize + "px monospace";
+          ctx.fillStyle = "#0ff";
+          ctx.fillText("==", centerX, centerY);
+        }
+      });
+      
+      // Display "yeh bro!" message briefly.
+      if (showMessage) {
+        if (Date.now() - messageTimestamp < messageDuration) {
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.font = (artFontSize * 1.2) + "px monospace";
+          ctx.fillStyle = "#fff";
+          ctx.fillText("yeh bro!", canvas.width / 2, canvas.height / 2);
+        } else {
+          showMessage = false;
+        }
+      }
+    }
+    
+    function randomFoodPosition() {
+      let position;
+      let collision;
+      do {
+        collision = false;
+        position = {
+          x: Math.floor(Math.random() * gridSize),
+          y: Math.floor(Math.random() * gridSize)
+        };
+        for (let segment of snake) {
+          if (segment.x === position.x && segment.y === position.y) {
+            collision = true;
+            break;
+          }
+        }
+      } while (collision);
+      return position;
+    }
+    
+    function gameOver() {
+      clearInterval(gameInterval);
+      stopMusic();
+      alert("Game Over! Your score: " + score + "\nIf your game is stuck, refresh the page or click the link again!");
+      // Do not auto-restart; wait for the user to click "Reset Game."
+    }
+    
+    /***********************
+     * COUNTDOWN & GAME RESET *
+     ***********************/
+    // Display a countdown ("2", "1", then "go!") before starting the game.
+    function startCountdown(callback) {
+      gamePaused = true;
+      let count = 2;
+      let countdownInterval = setInterval(() => {
+        ctx.fillStyle = "#000";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = "#fff";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.font = (canvas.width / 4) + "px monospace";
+        if (count > 0) {
+          ctx.fillText(count, canvas.width / 2, canvas.height / 2);
+        } else if (count === 0) {
+          ctx.fillText("go!", canvas.width / 2, canvas.height / 2);
+        } else {
+          clearInterval(countdownInterval);
+          gamePaused = false;
+          callback();
+          return;
+        }
+        count--;
+      }, 1000);
+    }
+    
+    function resetGame() {
+      clearInterval(gameInterval);
+      stopMusic();
+      score = 0;
+      document.getElementById('score').innerText = "Score: 0";
+      gameSpeed = 150;
+      direction = { x: 1, y: 0 };
+      snake = getInitialSnake();
+      food = randomFoodPosition();
+      startCountdown(() => {
+        if (!isMuted) {
+          startMusic();
+        }
+        gameInterval = setInterval(gameLoop, gameSpeed);
+      });
+    }
+    
+    /***********************
+     * CONTROLS & PREVENTING PAGE SCROLL *
+     ***********************/
+    // Prevent arrow keys from scrolling the page on desktop.
+    document.addEventListener('keydown', function(e) {
+      if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) {
+        e.preventDefault();
+      }
+      switch (e.key) {
+        case "ArrowUp":
+          if (direction.y !== 1) direction = { x: 0, y: -1 };
+          break;
+        case "ArrowDown":
+          if (direction.y !== -1) direction = { x: 0, y: 1 };
+          break;
+        case "ArrowLeft":
+          if (direction.x !== 1) direction = { x: -1, y: 0 };
+          break;
+        case "ArrowRight":
+          if (direction.x !== -1) direction = { x: 1, y: 0 };
+          break;
+      }
+    });
+    
+    // On-screen directional buttons.
+    document.getElementById('upButton').addEventListener('click', function() {
+      if (direction.y !== 1) direction = { x: 0, y: -1 };
+    });
+    document.getElementById('downButton').addEventListener('click', function() {
+      if (direction.y !== -1) direction = { x: 0, y: 1 };
+    });
+    document.getElementById('leftButton').addEventListener('click', function() {
+      if (direction.x !== 1) direction = { x: -1, y: 0 };
+    });
+    document.getElementById('rightButton').addEventListener('click', function() {
+      if (direction.x !== -1) direction = { x: 1, y: 0 };
+    });
+    
+    // Reset Game button.
+    document.getElementById('restartButton').addEventListener('click', resetGame);
+    
+    // Mute button toggles sound on/off. (Default is muted.)
+    document.getElementById('muteButton').addEventListener('click', function() {
+      isMuted = !isMuted;
+      if (isMuted) {
+        document.getElementById('muteButton').innerText = "🔇";
+        stopMusic();
+      } else {
+        document.getElementById('muteButton').innerText = "🔊";
+        startMusic();
+      }
+    });
+    
+    // Request custom game button.
+    document.getElementById('requestButton').addEventListener('click', function() {
+      window.location.href = "https://spruces.typeform.com/to/y8o1Wbn9";
+    });
+    
+    // Start the game for the first time.
+    resetGame();
+  </script>
+</body>
+</html>
