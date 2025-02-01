@@ -197,12 +197,12 @@
      ***********************/
     // Create an image object for the snake head.
     const snakeHeadImg = new Image();
-    snakeHeadImg.src = "snakehead.png"; // Make sure this file is in the same folder as index.html.
+    snakeHeadImg.src = "snakehead.png"; // Make sure snakehead.png is in the same folder as index.html.
     
     /***********************
      * ASCII ART DEFINITIONS *
      ***********************/
-    // (Optional: You can keep these for the food, etc.)
+    // (Optional: You can keep these for drawing food using ASCII.)
     const surferArt = [
       "  \\o/  ",
       "   |   ",
@@ -370,9 +370,16 @@
         let centerX = segment.x * cellSize + cellSize / 2;
         let centerY = segment.y * cellSize + cellSize / 2;
         if (index === 0) {
-          // Draw the snake head using the PNG image.
+          // Draw the snake head using the PNG image at 3x the cell size.
           if (snakeHeadImg.complete) {
-            ctx.drawImage(snakeHeadImg, centerX - cellSize / 2, centerY - cellSize / 2, cellSize, cellSize);
+            const factor = 3;
+            ctx.drawImage(
+              snakeHeadImg,
+              centerX - (factor * cellSize) / 2,
+              centerY - (factor * cellSize) / 2,
+              factor * cellSize,
+              factor * cellSize
+            );
           } else {
             ctx.font = artFontSize + "px monospace";
             ctx.fillStyle = "#ff0";
